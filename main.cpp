@@ -4,15 +4,22 @@
 #include <vector>
 #include <list>
 #include <time.h>
+#include <omp.h>
 #include "../eigen-3.4.0/Eigen/Eigen"
 #define MAXSIZE 10000
+#define BLOCKNUM 8
+#ifdef BLOCKNUM
+#define BLOCKSIZE (SIZE / BLOCKNUM)
+#endif
 #define REPEAT 1e5
 #define BETA 0.85
-#define EPSILON 1e-9
+#define EPSILON 1e-15
 #define SIZE Size
-#define DEBUG
-#define DEBUGINCYCLE
+//#define DEBUG
+//#define DEBUGINCYCLE
+#ifdef DEBUGINCYCLE
 #define PRINTINCYCLE 100
+#endif
 using namespace std;
 using namespace Eigen;
 
@@ -145,9 +152,33 @@ int runPageRank() {
 	int cnt = 0;
 	int i = 0;
 	double diff = 0.0;
+	double teleport_DE = 0.0;
+#ifdef BLOCKNUM
+	omp_set_num_threads(8);
+	vector<SparseMatrix<double>> BM(BLOCKNUM);
+#pragma omp parallel for
+	for (int j = 0; j < BLOCKNUM; j++) {
+		if (j < BLOCKNUM - 1)
+			BM[j] = M.block(j * BLOCKSIZE, 0, BLOCKSIZE, SIZE);
+		else
+			BM[j] = M.block(j * BLOCKSIZE, 0, BLOCKSIZE + SIZE % BLOCKNUM, SIZE);
+	}
+#endif
 	while (true) {
+#ifndef BLOCKNUM
 		WR = R[i].cwiseQuotient(W);
 		R[i ^ 1] = (BETA * ((M * WR).array() + DE.dot(WR))) + (1 - BETA) / SIZE;
+#else
+		WR = R[i].cwiseQuotient(W);
+		teleport_DE = DE.dot(WR);
+#pragma omp parallel for
+		for (int j = 0; j < BLOCKNUM; j++) {
+			if (j < BLOCKNUM - 1)
+				R[i ^ 1].segment(j * BLOCKSIZE, BLOCKSIZE) = (BETA * ((BM[j] * WR).array() + teleport_DE)) + (1 - BETA) / SIZE;
+			else
+				R[i ^ 1].segment(j * BLOCKSIZE, BLOCKSIZE + SIZE % BLOCKNUM) = (BETA * ((BM[j] * WR).array() + teleport_DE)) + (1 - BETA) / SIZE;
+		}
+#endif
 		diff = (R[i] - R[i ^ 1]).lpNorm<1>();
 #ifdef DEBUGINCYCLE
 		if (++cnt % PRINTINCYCLE == 0) {
@@ -171,9 +202,40 @@ int runPageRank() {
 	return 0;
 }
 
+void printRSorted(int num) {
+	vector<pair<double, int>> sorted;
+	for (int i = 0; i < SIZE; i++) {
+		sorted.push_back({ R[0](i), i });
+	}
+	sort(sorted.begin(), sorted.end(), greater<pair<double, int>>());
+	for (int i = 0; i < num; i++) {
+		cout << sorted[i].second + 1 << " " << sorted[i].first << endl;
+	}
+}
+
+void printRSorted(int num, const string& opath) {
+	ofstream file(opath);
+	if (!file.is_open()) {
+		cout << "Error: file not found" << endl;
+		return;
+	}
+	vector<pair<double, int>> sorted;
+	for (int i = 0; i < SIZE; i++) {
+		sorted.push_back({ R[0](i), i });
+	}
+	sort(sorted.begin(), sorted.end(), greater<pair<double, int>>());
+	for (int i = 0; i < num; i++) {
+		file << sorted[i].second + 1 << " " << sorted[i].first << endl;
+	}
+	file.close();
+}
+
 int main() {
+	clock_t start = clock();
 	readData("Data.txt");
 	// printGraph();
 	runPageRank();
+	printRSorted(100, "result.txt");
+	cout << "Time: " << (double)(clock() - start) / CLOCKS_PER_SEC << "s" << endl;
 	return 0;
 }
