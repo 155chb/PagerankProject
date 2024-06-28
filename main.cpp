@@ -154,7 +154,7 @@ int runPageRank() {
 	double diff = 0.0;
 	double teleport_DE = 0.0;
 #ifdef BLOCKNUM
-	omp_set_num_threads(8);
+	omp_set_num_threads(BLOCKNUM);
 	vector<SparseMatrix<double>> BM(BLOCKNUM);
 #pragma omp parallel for
 	for (int j = 0; j < BLOCKNUM; j++) {
